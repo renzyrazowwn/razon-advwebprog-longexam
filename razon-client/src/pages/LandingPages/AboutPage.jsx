@@ -70,7 +70,7 @@ const AboutPage = () => {
           </div>
 
           <div className="rounded-3xl border-2 border-[#2F3E8F] bg-white p-5">
-            <p className="text-2xl font-bold text-[#2F3E8F]">04</p>
+            <p className="text-2xl font-bold text-[#2F3E8F]">03</p>
             <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.24em] text-zinc-500">
               Categories
             </p>

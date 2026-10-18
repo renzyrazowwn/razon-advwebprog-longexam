@@ -11,7 +11,10 @@ const productRoutesV1 = require("./component/routes/productRoutesV1");
 const cartRoutes = require("./component/routes/cartRoutes");
 const orderRoutes = require("./component/routes/orderRoutes");
 const reviewRoutes = require("./component/routes/reviewRoutes");
+const supplierRoutes = require("./component/routes/supplierRoutes");
 const { auditLoggerMiddleware } = require("./component/middleware/auditLoggerMiddleware");
+const { imageUploadErrorHandler } = require("./component/middleware/uploadImageMiddleware");
+const { swaggerDocs } = require("./component/config/swagger");
 const app = express();
 
 connectDB();
@@ -66,6 +69,7 @@ app.use("/api/products", productRoutes);
 app.use("/api/carts", cartRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/reviews", reviewRoutes);
+app.use("/api/suppliers", supplierRoutes);
 
 app.use("/api/v1/users", userRoutes);
 app.use("/api/v1/categories", categoryRoutes);
@@ -73,6 +77,10 @@ app.use("/api/v1/products", productRoutesV1);
 app.use("/api/v1/carts", cartRoutes);
 app.use("/api/v1/orders", orderRoutes);
 app.use("/api/v1/reviews", reviewRoutes);
+app.use("/api/v1/suppliers", supplierRoutes);
+
+app.use(imageUploadErrorHandler);
+
 app.use((err, req, res, next) => {
     console.error("SERVER ERROR LOG:", err.stack);
 
@@ -87,4 +95,8 @@ app.use((err, req, res, next) => {
     });
 });
 
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, err => {
+    if (err) console.error("Error starting server: ", err);
+    console.log("Server running on port: ", PORT);
+    swaggerDocs(app, PORT);
+});

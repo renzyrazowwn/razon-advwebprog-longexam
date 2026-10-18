@@ -8,6 +8,7 @@ import * as reviewService from '../../services/reviewService';
 import { getErrorMessage } from '../../services/api';
 import { findMyCart, addToCart } from '../../utils/cart';
 import { formatPHP } from '../../utils/format';
+import { getProductImageUrl, handleImageError } from '../../utils/image';
 
 function ProductPage() {
   const { id } = useParams();
@@ -40,14 +41,12 @@ function ProductPage() {
       .fetchReviews()
       .then(({ data }) => setReviews((data.reviews || []).filter((r) => (r.productId?._id || r.productId) === id)))
       .catch(() => {
-        // Non-blocking: the product page still works without reviews loaded.
       });
   };
 
   useEffect(() => {
     loadProduct();
     loadReviews();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   const handleAddToCart = async () => {
@@ -130,8 +129,9 @@ function ProductPage() {
         <div className="mx-auto max-w-3xl">
           <div className="mb-8 flex aspect-4/3 items-center justify-center rounded-[1.25rem] border-2 border-zinc-900 bg-zinc-200">
             <img
-              src={product.image}
+              src={getProductImageUrl(product.image, 1200)} // PART 7: image from the database (Cloudinary)
               alt={product.productName}
+              onError={handleImageError} // PART 7: fallback if the image link is broken
               className="h-full w-full object-cover transition-transform duration-300 hover:scale-105"
             />
           </div>

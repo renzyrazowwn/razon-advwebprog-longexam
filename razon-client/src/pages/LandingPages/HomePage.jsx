@@ -54,7 +54,7 @@ const HomePage = () => {
                         </p>
                     </div>
                     <div className="rounded-3xl border-2 border-zinc-900 bg-zinc-100 p-5">
-                        <p className="text-2xl font-bold text-zinc-900">04</p>
+                        <p className="text-2xl font-bold text-zinc-900">03</p>
                         <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.24em] text-zinc-500">
                             Categories
                         </p>

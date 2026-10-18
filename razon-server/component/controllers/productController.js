@@ -3,6 +3,117 @@ const { HttpStatus } = require('../config/constants');
 const Product = require("../models/productModel");
 const Category = require("../models/categoryModel");
 
+const cloudinary = require("../config/cloudinary");
+
+const PRODUCT_IMAGE_FOLDER = "bulldogs-exchange/products";
+
+const uploadToCloudinary = (buffer) =>
+  new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder: PRODUCT_IMAGE_FOLDER,
+        resource_type: "image", // PART 7: Cloudinary also rejects non-images
+      },
+      (error, result) => (error ? reject(error) : resolve(result))
+    );
+
+    stream.end(buffer);
+  });
+
+const deleteFromCloudinary = async (publicId) => {
+  if (!publicId) return;
+
+  try {
+    await cloudinary.uploader.destroy(publicId, { resource_type: "image" });
+  } catch (error) {
+    console.error(`Cloudinary cleanup failed for ${publicId}:`, error.message);
+  }
+};
+
+class ProductRequestError extends Error {
+  constructor(statusCode, message) {
+    super(message);
+    this.statusCode = statusCode;
+  }
+}
+
+const getProductData = (body = {}) => {
+  const data = { ...body };
+  delete data.imagePublicId;
+  return data;
+};
+
+const createProductWithImage = async (req) => {
+  const data = getProductData(req.body);
+
+  if (!req.file && !data.image) {
+    throw new ProductRequestError(400, "Product image is required. Please upload a JPEG, PNG, or WEBP image.");
+  }
+
+  let uploaded = null;
+  if (req.file) {
+    uploaded = await uploadToCloudinary(req.file.buffer);
+    data.image = uploaded.secure_url;
+    data.imagePublicId = uploaded.public_id;
+  }
+
+  try {
+    return await Product.create(data);
+  } catch (error) {
+    // Product failed validation, so remove the image we just uploaded
+    if (uploaded) await deleteFromCloudinary(uploaded.public_id);
+    throw new ProductRequestError(400, error.message);
+  }
+};
+
+const updateProductWithImage = async (req) => {
+  const existing = await Product.findById(req.params.id);
+
+  if (!existing) {
+    throw new ProductRequestError(404, "Product not found.");
+  }
+
+  const oldPublicId = existing.imagePublicId; // remember the current Cloudinary image
+  const data = getProductData(req.body);
+  let uploaded = null;
+
+  if (req.file) {
+    uploaded = await uploadToCloudinary(req.file.buffer);
+    data.image = uploaded.secure_url;
+    data.imagePublicId = uploaded.public_id;
+  } else if (data.image && data.image !== existing.image) {
+    // Image was changed to a plain URL, so it no longer points to our Cloudinary file
+    data.imagePublicId = "";
+  } else {
+    // No new image, keep the current one
+    delete data.image;
+  }
+
+  let product;
+  try {
+    product = await Product.findByIdAndUpdate(req.params.id, data, {
+      new: true,
+      runValidators: true,
+    });
+  } catch (error) {
+    if (uploaded) await deleteFromCloudinary(uploaded.public_id);
+    throw new ProductRequestError(400, error.message);
+  }
+
+  // Remove the replaced image from Cloudinary
+  if (oldPublicId && oldPublicId !== product.imagePublicId) {
+    await deleteFromCloudinary(oldPublicId);
+  }
+
+  return product;
+};
+
+const getErrorStatus = (error) => {
+  if (error.statusCode) return error.statusCode;
+  if (error.name === "CastError") return HttpStatus.BAD_REQUEST; // invalid product id
+  return HttpStatus.INTERNAL_SERVER_ERROR; // e.g. Cloudinary upload failed
+};
+
 const buildProductFilter = async (query) => {
   const filter = {};
 
@@ -71,33 +182,21 @@ const getProducts = async (req, res) => {
 
 const createProduct = async (req, res) => {
   try {
-    const product = await Product.create(req.body);
+    // PART 7: create with the uploaded image (if any)
+    const product = await createProductWithImage(req);
     res.status(HttpStatus.CREATED).json(product);
   } catch (error) {
-    res.status(HttpStatus.BAD_REQUEST).json({ message: error.message });
+    res.status(getErrorStatus(error)).json({ message: error.message }); // PART 7
   }
 };
 
 const updateProduct = async (req, res) => {
   try {
-    const product = await Product.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      {
-        new: true,
-        runValidators: true,
-      }
-    );
-
-    if (!product) {
-      return res.status(HttpStatus.NOT_FOUND).json({
-        message: "Product not found",
-      });
-    }
-
+    // PART 7: update + replace the image (if a new one was uploaded)
+    const product = await updateProductWithImage(req);
     res.status(HttpStatus.OK).json(product);
   } catch (error) {
-    res.status(HttpStatus.BAD_REQUEST).json({ message: error.message });
+    res.status(getErrorStatus(error)).json({ message: error.message }); // PART 7
   }
 };
 
@@ -110,6 +209,9 @@ const deleteProduct = async (req, res) => {
         message: "Product not found",
       });
     }
+
+    // PART 7: also delete the product's image from Cloudinary
+    await deleteFromCloudinary(product.imagePublicId);
 
     res.status(HttpStatus.OK).json({
       message: "Product deleted successfully",
@@ -185,14 +287,15 @@ const getProductByIdV1 = async (req, res) => {
 
 const createProductV1 = async (req, res) => {
   try {
-    const product = await Product.create(req.body);
+    // PART 7: create with the uploaded image (if any)
+    const product = await createProductWithImage(req);
     res.status(HttpStatus.CREATED).json({
       success: true,
       message: "Product created successfully.",
       data: product,
     });
   } catch (error) {
-    res.status(HttpStatus.BAD_REQUEST).json({
+    res.status(getErrorStatus(error)).json({ // PART 7
       success: false,
       message: error.message,
       data: null,
@@ -202,18 +305,8 @@ const createProductV1 = async (req, res) => {
 
 const updateProductV1 = async (req, res) => {
   try {
-    const product = await Product.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
-      runValidators: true,
-    });
-
-    if (!product) {
-      return res.status(HttpStatus.NOT_FOUND).json({
-        success: false,
-        message: "Product not found.",
-        data: null,
-      });
-    }
+    // PART 7: update + replace the image (if a new one was uploaded)
+    const product = await updateProductWithImage(req);
 
     res.status(HttpStatus.OK).json({
       success: true,
@@ -221,7 +314,7 @@ const updateProductV1 = async (req, res) => {
       data: product,
     });
   } catch (error) {
-    res.status(HttpStatus.BAD_REQUEST).json({
+    res.status(getErrorStatus(error)).json({ // PART 7
       success: false,
       message: error.message,
       data: null,
@@ -241,6 +334,9 @@ const deleteProductV1 = async (req, res) => {
       });
     }
 
+    // PART 7: also delete the product's image from Cloudinary
+    await deleteFromCloudinary(product.imagePublicId);
+
     res.status(HttpStatus.OK).json({
       success: true,
       message: "Product deleted successfully.",
@@ -255,6 +351,49 @@ const deleteProductV1 = async (req, res) => {
   }
 };
 
+const uploadProductImage = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(HttpStatus.BAD_REQUEST).json({
+        success: false,
+        message: 'No image uploaded. Send a JPEG, PNG, or WEBP file in the "image" field.',
+      });
+    }
+
+    const product = await Product.findById(req.params.id);
+    if (!product) {
+      return res.status(HttpStatus.NOT_FOUND).json({
+        success: false,
+        message: "Product not found.",
+      });
+    }
+
+    const result = await uploadToCloudinary(req.file.buffer);
+
+    const oldPublicId = product.imagePublicId;
+    product.image = result.secure_url;
+    product.imagePublicId = result.public_id;
+    await product.save();
+
+    if (oldPublicId && oldPublicId !== result.public_id) {
+      await deleteFromCloudinary(oldPublicId);
+    }
+
+    res.status(HttpStatus.OK).json({
+      success: true,
+      message: "Product image uploaded successfully.",
+      imageUrl: result.secure_url,
+      publicId: result.public_id,
+      data: product,
+    });
+  } catch (error) {
+    res.status(getErrorStatus(error)).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
 module.exports = {
   getProducts,
   createProduct,
@@ -265,4 +404,5 @@ module.exports = {
   createProductV1,
   updateProductV1,
   deleteProductV1,
+  uploadProductImage,
 };

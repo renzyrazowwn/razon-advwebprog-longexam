@@ -1,13 +1,15 @@
 import Button from './Button';
 import { formatPHP } from '../utils/format';
+import { getProductImageUrl, handleImageError } from '../utils/image'; // PART 7
 
 const ProductCard = ({ product, index }) => {
   return (
     <article className="rounded-3xl border-2 border-[#2F3E8F] bg-white p-4 shadow-sm transition hover:-translate-y-1 hover:shadow-lg">
       <div className="flex aspect-4/3 items-center justify-center overflow-hidden rounded-[1.25rem] bg-zinc-200">
         <img
-          src={product.image}
+          src={getProductImageUrl(product.image, 600)} // PART 7: image from the database (Cloudinary)
           alt={product.productName}
+          onError={handleImageError} // PART 7: fallback if the image link is broken
           className="h-full w-full object-cover transition-transform duration-300 hover:scale-105"
         />
       </div>

@@ -26,9 +26,16 @@ const productSchema = new mongoose.Schema(
       min: [0, "Stock cannot be negative"],
     },
 
+    // holds the Cloudinary secure_url of the uploaded product image
     image: {
       type: String,
       required: [true, "Image is required"],
+      trim: true,
+    },
+
+    imagePublicId: {
+      type: String,
+      default: "",
       trim: true,
     },
 

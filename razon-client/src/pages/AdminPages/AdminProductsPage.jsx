@@ -1,10 +1,19 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react'; // PART 7: useRef
 import Button from '../../components/Button';
 import Alert from '../../components/Alert';
 import * as productService from '../../services/productService';
 import * as categoryService from '../../services/categoryService';
 import { getErrorMessage } from '../../services/api';
 import { formatPHP } from '../../utils/format';
+// PART 7: image validation + display helpers
+import {
+  IMAGE_ACCEPT,
+  MAX_IMAGE_SIZE_MB,
+  formatFileSize,
+  getProductImageUrl,
+  handleImageError,
+  validateImageFile,
+} from '../../utils/image';
 
 const emptyForm = { productName: '', description: '', price: '', stock: '', image: '', categoryId: '' };
 const inputClasses = 'mt-1 w-full rounded-xl border-2 border-zinc-300 px-3 py-2 text-sm outline-none focus:border-[#2F3E8F]';
@@ -19,6 +28,20 @@ const AdminProductsPage = () => {
   const [editingId, setEditingId] = useState(null);
   const [formError, setFormError] = useState('');
   const [saving, setSaving] = useState(false);
+
+  // PART 7: selected image file, its local preview URL, and image errors
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreview, setImagePreview] = useState('');
+  const [imageError, setImageError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+  const fileInputRef = useRef(null);
+
+  // PART 7: free the browser memory used by the old preview URL
+  useEffect(() => {
+    return () => {
+      if (imagePreview) URL.revokeObjectURL(imagePreview);
+    };
+  }, [imagePreview]);
 
   const load = () => {
     setLoading(true);
@@ -37,7 +60,42 @@ const AdminProductsPage = () => {
     setForm((prev) => ({ ...prev, [event.target.name]: event.target.value }));
   };
 
+  // PART 7: clear the chosen image file + preview
+  const clearImage = () => {
+    setImageFile(null);
+    setImagePreview('');
+    setImageError('');
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  // PART 7: validate the chosen file first, then show a preview before saving
+  const handleImageChange = async (event) => {
+    const file = event.target.files?.[0];
+    setSuccessMessage('');
+
+    if (!file) {
+      clearImage();
+      return;
+    }
+
+    const validationError = await validateImageFile(file);
+    if (validationError) {
+      setImageFile(null);
+      setImagePreview('');
+      setImageError(validationError);
+      event.target.value = '';
+      return;
+    }
+
+    setImageError('');
+    setImageFile(file);
+    setImagePreview(URL.createObjectURL(file));
+  };
+
   const startEdit = (product) => {
+    clearImage(); // PART 7
+    setFormError('');
+    setSuccessMessage('');
     setEditingId(product._id);
     setForm({
       productName: product.productName,
@@ -53,25 +111,37 @@ const AdminProductsPage = () => {
     setEditingId(null);
     setForm(emptyForm);
     setFormError('');
+    clearImage(); // PART 7
   };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
     setFormError('');
+    setSuccessMessage('');
+
+    // PART 7: a new product must have an image
+    if (!editingId && !imageFile) {
+      setImageError('Please choose a product image before creating the product.');
+      return;
+    }
+
     setSaving(true);
 
+    // PART 7: the image now comes from the uploaded file, not a typed URL
+    const { image: _currentImage, ...fields } = form;
     const payload = {
-      ...form,
+      ...fields,
       price: Number(form.price),
       stock: Number(form.stock),
     };
 
     try {
       if (editingId) {
-        await productService.updateProduct(editingId, payload);
+        await productService.updateProduct(editingId, payload, imageFile); // PART 7
       } else {
-        await productService.createProduct(payload);
+        await productService.createProduct(payload, imageFile); // PART 7
       }
+      setSuccessMessage(editingId ? 'Product updated successfully.' : 'Product created successfully.');
       cancelEdit();
       load();
     } catch (err) {
@@ -98,6 +168,7 @@ const AdminProductsPage = () => {
       <form className="flex flex-col gap-4 rounded-2xl border-2 border-zinc-900 bg-white p-5" onSubmit={handleSubmit}>
         <h2 className="text-sm font-semibold text-zinc-900">{editingId ? 'Edit Product' : 'Create Product'}</h2>
         {formError && <Alert tone="error">{formError}</Alert>}
+        {successMessage && <Alert tone="success">{successMessage}</Alert>}
 
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="block text-sm text-zinc-700">
@@ -120,7 +191,7 @@ const AdminProductsPage = () => {
           <textarea name="description" required rows={2} value={form.description} onChange={handleChange} className={inputClasses} />
         </label>
 
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2">
           <label className="block text-sm text-zinc-700">
             Price (PHP)
             <input name="price" type="number" min="0" step="0.01" required value={form.price} onChange={handleChange} className={inputClasses} />
@@ -129,10 +200,53 @@ const AdminProductsPage = () => {
             Stock
             <input name="stock" type="number" min="0" required value={form.stock} onChange={handleChange} className={inputClasses} />
           </label>
-          <label className="block text-sm text-zinc-700">
-            Image URL
-            <input name="image" required value={form.image} onChange={handleChange} className={inputClasses} />
-          </label>
+        </div>
+
+        {/* PART 7: image upload with preview */}
+        <div className="grid gap-4 sm:grid-cols-[1fr_14rem]">
+          <div className="flex flex-col gap-2">
+            <label className="block text-sm text-zinc-700">
+              Product Image {editingId ? '(optional, choose a file to replace the current image)' : ''}
+              <input
+                ref={fileInputRef}
+                type="file"
+                name="image"
+                accept={IMAGE_ACCEPT}
+                onChange={handleImageChange}
+                className={`${inputClasses} file:mr-3 file:rounded-full file:border-0 file:bg-[#2F3E8F] file:px-3 file:py-1 file:text-xs file:font-semibold file:text-white`}
+              />
+            </label>
+            <p className="text-xs text-zinc-500">
+              JPEG, PNG, or WEBP only. Maximum size {MAX_IMAGE_SIZE_MB}MB.
+            </p>
+            {imageError && <Alert tone="error">{imageError}</Alert>}
+            {imageFile && (
+              <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-600">
+                <span>
+                  Selected: <span className="font-semibold text-zinc-900">{imageFile.name}</span> ({formatFileSize(imageFile.size)})
+                </span>
+                <Button onClick={clearImage}>Remove</Button>
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <span className="text-sm text-zinc-700">
+              {imagePreview ? 'New image preview' : editingId ? 'Current image' : 'Image preview'}
+            </span>
+            <div className="flex aspect-4/3 items-center justify-center overflow-hidden rounded-xl border-2 border-dashed border-zinc-300 bg-zinc-100">
+              {imagePreview || (editingId && form.image) ? (
+                <img
+                  src={imagePreview || getProductImageUrl(form.image, 400)}
+                  alt="Product preview"
+                  onError={handleImageError}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <span className="px-3 text-center text-xs text-zinc-500">No image selected</span>
+              )}
+            </div>
+          </div>
         </div>
 
         <div className="flex gap-3">
@@ -152,6 +266,7 @@ const AdminProductsPage = () => {
           <table className="w-full text-left text-sm">
             <thead className="bg-[#2F3E8F] text-white">
               <tr>
+                <th className="px-4 py-2">Image</th>{/* PART 7 */}
                 <th className="px-4 py-2">Name</th>
                 <th className="px-4 py-2">Category</th>
                 <th className="px-4 py-2">Price</th>
@@ -162,6 +277,15 @@ const AdminProductsPage = () => {
             <tbody>
               {products.map((product) => (
                 <tr key={product._id} className="border-t border-zinc-200">
+                  {/* image from the database (Cloudinary URL) */}
+                  <td className="px-4 py-2">
+                    <img
+                      src={getProductImageUrl(product.image, 120)}
+                      alt={product.productName}
+                      onError={handleImageError}
+                      className="h-12 w-12 rounded-lg border border-zinc-300 object-cover"
+                    />
+                  </td>
                   <td className="px-4 py-2 font-medium text-zinc-900">{product.productName}</td>
                   <td className="px-4 py-2 text-zinc-600">{product.categoryId?.categoryName || '—'}</td>
                   <td className="px-4 py-2 text-zinc-600">{formatPHP(product.price)}</td>
